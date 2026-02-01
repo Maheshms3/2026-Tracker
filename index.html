@@ -486,6 +486,11 @@ const [activeMonth, setActiveMonth] = useState(currentMonth);
         const i = setInterval(updateCurrentDay, 60000);
         return () => clearInterval(i);
       }, []);
+      // ✅ AUTO-SYNC MONTH WITH DAY (guaranteed)
+useEffect(() => {
+  const d = new Date(YEAR, 0, activeDayIdx + 1);
+  setActiveMonth(d.getMonth());
+}, [activeDayIdx]);
 // =====================
 // AUTO-SCROLL TRACKER TO TODAY (guaranteed)
 // =====================
@@ -1280,8 +1285,8 @@ const visibleDayIndices = useMemo(() => {
   className="bg-[#0d0f12] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-300"
 >
   {MONTHS
-    .filter(m => m.month <= currentMonth)   // ❌ hides future months
-    .map(m => (
+  .filter(m => m.startIdx <= activeDayIdx)
+  .map(m => (
       <option key={m.month} value={m.month}>
         {m.label}
       </option>
@@ -2021,3 +2026,4 @@ const visibleDayIndices = useMemo(() => {
   </script>
 </body>
 </html>
+
