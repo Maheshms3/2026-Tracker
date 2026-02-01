@@ -1,0 +1,2023 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2026 Discipline Protocol (Smart System)</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- ✅ Change 1: Pin Lucide -->
+  <script src="https://unpkg.com/lucide@0.477.0"></script>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0d0f12; margin: 0; overflow: hidden; }
+    .auth-input { background: #15191e; border: 1px solid rgba(255,255,255,0.1); color: white; padding: 12px; border-radius: 8px; width: 100%; outline: none; transition: border-color 0.2s; }
+    .auth-input:focus { border-color: #10b981; }
+    .auth-btn { background: #10b981; color: #0d0f12; font-weight: 800; padding: 12px; border-radius: 8px; width: 100%; margin-top: 10px; cursor: pointer; transition: opacity 0.2s; }
+    .auth-btn:hover { opacity: 0.9; }
+    .spinner { border: 3px solid rgba(255,255,255,0.1); border-left-color: #10b981; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .h-btn { font-size: 10px; padding: 6px 10px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #94a3b8; transition: all 0.2s; text-align: left; cursor: pointer;}
+    .h-btn:hover { border-color: #10b981; color: white; background: #10b98110; }
+    .h-input { background: #000000; border: 1px solid #334155; border-radius: 6px; color: white; padding: 8px; font-size: 12px; width: 100%; outline: none; transition: border-color 0.2s;}
+    .h-input:focus { border-color: #10b981; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // =====================
+    // FIREBASE
+    // =====================
+    const firebaseConfig = {
+      apiKey: "AIzaSyDgl7OeNoB4hP4Gj9Uu0CGUkMXQ1E5RouI",
+      authDomain: "protocol-2026.firebaseapp.com",
+      projectId: "protocol-2026",
+      storageBucket: "protocol-2026.firebasestorage.app",
+      messagingSenderId: "1029399573416",
+      appId: "1:1029399573416:web:7a579d6192b1b7df59a39d",
+      measurementId: "G-4T42HLM5PG"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    const { useState, useMemo, useEffect, useRef } = React;
+    const { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ComposedChart, Line, ReferenceLine, CartesianGrid } = window.Recharts || {};
+
+    // =====================
+    // ICON
+    // =====================
+    const LucideIcon = ({ name, size = 20, className = "" }) => {
+      const iconRef = useRef(null);
+      useEffect(() => {
+        if (window.lucide && iconRef.current) {
+          const kebabName = name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+          iconRef.current.innerHTML = `<i data-lucide="${kebabName}"></i>`;
+          window.lucide.createIcons({ attrs: { width: size, height: size, class: className } });
+        }
+      }, [name, size, className]);
+      return <span ref={iconRef} className="inline-flex items-center justify-center leading-none" />;
+    };
+    LucideIcon.propTypes = { name: PropTypes.string.isRequired, size: PropTypes.number, className: PropTypes.string };
+
+    // =====================
+    // CONSTANTS
+    // =====================
+    const YEAR = 2026;
+    const START_DATE = new Date(YEAR, 0, 1);
+    const DAYS_IN_YEAR = 365;
+// =====================
+// MONTH HELPERS (NEW)
+// =====================
+function getMonthMeta(year) {
+  const months = [];
+  for (let m = 0; m < 12; m++) {
+    const start = new Date(year, m, 1);
+    const end = new Date(year, m + 1, 0);
+    const startIdx = Math.floor((start - START_DATE) / 86400000);
+    const endIdx = Math.floor((end - START_DATE) / 86400000);
+
+    months.push({
+      month: m,
+      label: start.toLocaleString('en-US', { month: 'long' }),
+      startIdx,
+      endIdx
+    });
+  }
+  return months;
+}
+
+const MONTHS = getMonthMeta(YEAR);
+
+    // ✅ UPDATE 7A: empty defaults (no seeded categories/tasks for new users)
+    const INITIAL_CATEGORIES = [];
+    const INITIAL_TASKS = [];
+
+    // =====================
+    // FIRESTORE HELPERS
+    // =====================
+    function userYearConfigRef(uid) { return db.collection('users').doc(uid).collection('yearConfig').doc(String(YEAR)); }
+    function dayRef(uid, dayIndex) { return db.collection('users').doc(uid).collection('years').doc(String(YEAR)).collection('days').doc(String(dayIndex)); }
+    function daysCollectionRef(uid) { return db.collection('users').doc(uid).collection('years').doc(String(YEAR)).collection('days'); }
+    async function safeGet(ref) { const snap = await ref.get(); return snap.exists ? snap.data() : null; }
+    async function mergeSet(ref, patch) { await ref.set(patch, { merge: true }); }
+
+    // =====================
+    // UTIL: NORMALIZE KEYS
+    // =====================
+    const normalizeKey = (name) => {
+      const s = (name || '').trim().toLowerCase();
+      const cleaned = s.replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, '-');
+      return cleaned || 'task';
+    };
+
+    // UPDATED: prevent same-day collisions by adding suffix
+    const makeFreshKey = (baseKey, dayIdx) => {
+      const rand = Date.now().toString(36);
+      return `${baseKey}-fresh-${String(dayIdx).padStart(3,'0')}-${rand}`;
+    };
+
+    function getDayDetails(idx) {
+      const date = new Date(YEAR, 0, idx + 1);
+      return {
+        dateStr: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        dayName: date.toLocaleDateString('en-US', { weekday: 'long' })
+      };
+    }
+
+    // =====================
+    // SMALL HELPERS
+    // =====================
+    const sortUniqueStrings = (arr) => Array.from(new Set((arr || []).map(String))).sort();
+    const arraysEqual = (a, b) => {
+      if (!Array.isArray(a) || !Array.isArray(b)) return false;
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    };
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+    // =====================
+    // UI: CONFIRM MODAL
+    // =====================
+    const ConfirmModal = ({ open, title, description, dangerText = "Delete", cancelText = "Cancel", onConfirm, onClose }) => {
+      if (!open) return null;
+      return (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70" onClick={onClose}></div>
+          <div className="relative w-[92%] max-w-md bg-[#15191e] border border-white/10 rounded-2xl shadow-2xl p-6">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
+                <LucideIcon name="AlertTriangle" size={18} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-white font-black">{title}</div>
+                <div className="text-xs text-slate-400 mt-1 leading-relaxed">{description}</div>
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-sm font-bold">
+                {cancelText}
+              </button>
+              <button onClick={onConfirm} className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-400 text-[#0d0f12] text-sm font-black">
+                {dangerText}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+    ConfirmModal.propTypes = {
+      open: PropTypes.bool,
+      title: PropTypes.string,
+      description: PropTypes.string,
+      dangerText: PropTypes.string,
+      cancelText: PropTypes.string,
+      onConfirm: PropTypes.func,
+      onClose: PropTypes.func
+    };
+
+    // =====================
+    // UI: CHOICE MODAL
+    // =====================
+    const ChoiceModal = ({ open, title, description, primaryText, secondaryText, cancelText="Cancel", onPrimary, onSecondary, onClose, iconName="HelpCircle" }) => {
+      if (!open) return null;
+      return (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70" onClick={onClose}></div>
+          <div className="relative w-[92%] max-w-md bg-[#15191e] border border-white/10 rounded-2xl shadow-2xl p-6">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-300">
+                <LucideIcon name={iconName} size={18} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-white font-black">{title}</div>
+                <div className="text-xs text-slate-400 mt-1 leading-relaxed">{description}</div>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col gap-2">
+              <button onClick={onPrimary} className="w-full px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[#0d0f12] text-sm font-black">
+                {primaryText}
+              </button>
+              <button onClick={onSecondary} className="w-full px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-sm font-bold">
+                {secondaryText}
+              </button>
+              <button onClick={onClose} className="w-full px-4 py-2 rounded-xl bg-transparent hover:bg-white/5 border border-white/10 text-slate-500 text-sm font-bold">
+                {cancelText}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+    ChoiceModal.propTypes = {
+      open: PropTypes.bool,
+      title: PropTypes.string,
+      description: PropTypes.string,
+      primaryText: PropTypes.string,
+      secondaryText: PropTypes.string,
+      cancelText: PropTypes.string,
+      onPrimary: PropTypes.func,
+      onSecondary: PropTypes.func,
+      onClose: PropTypes.func,
+      iconName: PropTypes.string
+    };
+
+    // =====================
+    // AUTH SCREEN
+    // =====================
+    const AuthScreen = () => {
+      const [isSignUp, setIsSignUp] = useState(false);
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [error, setError] = useState(null);
+      const [loading, setLoading] = useState(false);
+
+      const handleAuth = async (e) => {
+        e.preventDefault(); setError(null); setLoading(true);
+        try {
+          isSignUp
+            ? await auth.createUserWithEmailAndPassword(email, password)
+            : await auth.signInWithEmailAndPassword(email, password);
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="flex items-center justify-center h-screen bg-[#0d0f12] text-slate-200">
+          <div className="w-full max-w-md p-8 bg-[#15191e] border border-white/5 rounded-3xl shadow-2xl">
+            <div className="flex justify-center mb-6">
+              <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+                <LucideIcon name="Lock" size={24} />
+              </div>
+            </div>
+            <h2 className="text-2xl font-bold text-center mb-2">{isSignUp ? 'Initialize System' : 'Access System'}</h2>
+            <form onSubmit={handleAuth} className="space-y-4 mt-8">
+              <input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="auth-input" placeholder="operative@protocol.com" />
+              <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="auth-input" placeholder="••••••••" />
+              {error && <div className="text-red-400 text-xs bg-red-500/10 p-3 rounded-lg border border-red-500/20">{error}</div>}
+              <button type="submit" disabled={loading} className="auth-btn flex justify-center">
+                {loading ? <div className="spinner"></div> : (isSignUp ? 'Create ID' : 'Authenticate')}
+              </button>
+            </form>
+            <div className="mt-6 text-center">
+              <button onClick={() => setIsSignUp(!isSignUp)} className="text-sm text-slate-500 hover:text-emerald-400 transition-colors">
+                {isSignUp ? 'Login' : 'Create Account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // =====================
+    // ONBOARDING SCREEN (✅ UPDATE 7C)
+    // =====================
+    const OnboardingScreen = ({ open, profile, setProfile, firstCategory, setFirstCategory, onSubmit }) => {
+      if (!open) return null;
+      return (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/70">
+          <div className="w-[92%] max-w-lg bg-[#15191e] border border-white/10 rounded-3xl shadow-2xl p-8 text-slate-200">
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-300">
+                <LucideIcon name="Sparkles" size={20} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-white font-black text-xl">Initialize your Protocol</div>
+                <div className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  One-time setup. Existing users keep everything unchanged.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Height (cm)</label>
+                <input
+                  type="number"
+                  className="auth-input mt-2"
+                  value={profile.height}
+                  onChange={(e) => setProfile(p => ({ ...p, height: e.target.value }))}
+                  placeholder="e.g., 175"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Current Weight (kg)</label>
+                <input
+                  type="number"
+                  className="auth-input mt-2"
+                  value={profile.weight}
+                  onChange={(e) => setProfile(p => ({ ...p, weight: e.target.value }))}
+                  placeholder="e.g., 72"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Goal Weight (kg)</label>
+                <input
+                  type="number"
+                  className="auth-input mt-2"
+                  value={profile.goalWeight}
+                  onChange={(e) => setProfile(p => ({ ...p, goalWeight: e.target.value }))}
+                  placeholder="e.g., 65"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase">First Category (optional)</label>
+                <input
+                  type="text"
+                  className="auth-input mt-2"
+                  value={firstCategory}
+                  onChange={(e) => setFirstCategory(e.target.value)}
+                  placeholder="e.g., HEALTH"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Plan (short)</label>
+              <textarea
+                className="mt-2 w-full bg-[#0d0f12] border border-white/10 rounded-2xl p-4 text-sm focus:outline-none transition-colors resize-none min-h-[120px]"
+                value={profile.plan}
+                onChange={(e) => setProfile(p => ({ ...p, plan: e.target.value }))}
+                placeholder="Your strategy for 2026..."
+              />
+            </div>
+
+            <button
+              onClick={onSubmit}
+              className="auth-btn mt-6"
+            >
+              Start Protocol
+            </button>
+
+            <div className="text-[10px] text-slate-500 mt-3">
+              You can add categories and tasks in Settings after this.
+            </div>
+          </div>
+        </div>
+      );
+    };
+    OnboardingScreen.propTypes = {
+      open: PropTypes.bool,
+      profile: PropTypes.object,
+      setProfile: PropTypes.func,
+      firstCategory: PropTypes.string,
+      setFirstCategory: PropTypes.func,
+      onSubmit: PropTypes.func
+    };
+
+    // =====================
+    // APP
+    // =====================
+    const App = () => {
+      const [user, setUser] = useState(null);
+      const [authLoading, setAuthLoading] = useState(true);
+      const [dataLoading, setDataLoading] = useState(false);
+
+      const [view, setView] = useState('tracker');
+      const [isManageOpen, setIsManageOpen] = useState(false);
+
+      const [categories, setCategories] = useState(INITIAL_CATEGORIES);
+      const [tasks, setTasks] = useState(INITIAL_TASKS);
+
+      // ✅ Change 2: Add tasksRef (inside App())
+      const tasksRef = useRef(tasks);
+      useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+
+      // logs keyed by behaviorKey => logs[key][dayIndex] = 1
+      const [logs, setLogs] = useState({});
+      const [notes, setNotes] = useState({});
+      const [healthLogs, setHealthLogs] = useState({});
+
+      const [selectedDay, setSelectedDay] = useState(null);
+
+      // ✅ UPDATE 3: tracker must open on today (clamped)
+      const initialIdxRaw = Math.floor((Date.now() - START_DATE) / (1000 * 60 * 60 * 24));
+      const initialIdx = Math.max(0, Math.min(DAYS_IN_YEAR - 1, initialIdxRaw));
+      const [activeDayIdx, setActiveDayIdx] = useState(initialIdx);
+// =====================
+// MONTH VIEW STATE (NEW)
+// =====================
+const today = new Date();
+const currentMonth = today.getMonth();
+const [activeMonth, setActiveMonth] = useState(currentMonth);
+      const [newCatName, setNewCatName] = useState('');
+      const [newTaskNames, setNewTaskNames] = useState({});
+
+      const scrollContainerRef = useRef(null);
+      const isDataLoaded = useRef(false);
+
+      // ✅ UPDATE 7C: onboarding gate state + profile
+      const [needsOnboarding, setNeedsOnboarding] = useState(false);
+      const [profile, setProfile] = useState({ height:'', weight:'', goalWeight:'', plan:'' });
+      const [firstCategory, setFirstCategory] = useState('');
+
+      // Collapsibles
+      const [showArchivedManage, setShowArchivedManage] = useState(false);
+      const [archivedCatOpen, setArchivedCatOpen] = useState({});
+      const [archivedTaskOpen, setArchivedTaskOpen] = useState({}); // by catId
+      const [showArchivedTracker, setShowArchivedTracker] = useState(false);
+      const [trackerCatOpen, setTrackerCatOpen] = useState({}); // per category
+
+      // Permanent delete modal
+      const [confirmState, setConfirmState] = useState({
+        open: false,
+        title: '',
+        description: '',
+        dangerText: 'Delete',
+        onConfirm: null
+      });
+
+      // Choice modal
+      const [choiceState, setChoiceState] = useState({
+        open: false,
+        title: '',
+        description: '',
+        primaryText: '',
+        secondaryText: '',
+        iconName: 'HelpCircle',
+        onPrimary: null,
+        onSecondary: null
+      });
+
+      const openConfirm = ({ title, description, dangerText = "Delete", onConfirm }) => {
+        setConfirmState({ open: true, title, description, dangerText, onConfirm });
+      };
+      const closeConfirm = () => setConfirmState(s => ({ ...s, open: false, onConfirm: null }));
+
+      const openChoice = ({ title, description, primaryText, secondaryText, iconName="HelpCircle", onPrimary, onSecondary }) => {
+        setChoiceState({ open: true, title, description, primaryText, secondaryText, iconName, onPrimary, onSecondary });
+      };
+      const closeChoice = () => setChoiceState(s => ({ ...s, open: false, onPrimary: null, onSecondary: null }));
+
+      const updateCurrentDay = () => {
+        const today = new Date();
+        if (today.getFullYear() === YEAR) {
+          const diff = today - START_DATE;
+          const idx = Math.floor(diff / (1000 * 60 * 60 * 24));
+          setActiveDayIdx(idx >= 0 && idx < DAYS_IN_YEAR ? idx : 0);
+        } else if (today.getFullYear() > YEAR) {
+          setActiveDayIdx(DAYS_IN_YEAR - 1);
+        } else {
+          setActiveDayIdx(0);
+        }
+      };
+
+      useEffect(() => {
+        updateCurrentDay();
+        const i = setInterval(updateCurrentDay, 60000);
+        return () => clearInterval(i);
+      }, []);
+// =====================
+// AUTO-SCROLL TRACKER TO TODAY (guaranteed)
+// =====================
+useEffect(() => {
+  if (!scrollContainerRef.current) return;
+
+  // wait until tracker rows exist
+  const el = scrollContainerRef.current;
+  const expectedWidth = DAYS_IN_YEAR * 56;
+
+  const tryScroll = () => {
+    if (el.scrollWidth < expectedWidth) {
+      requestAnimationFrame(tryScroll);
+      return;
+    }
+
+    el.scrollLeft = Math.max(0, (activeDayIdx - 3) * 56);
+  };
+
+  tryScroll();
+}, [activeDayIdx, categories.length, tasks.length]);
+      // ✅ UPDATE 4B: auto-scroll tracker to today on load / whenever activeDayIdx changes
+      useEffect(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollLeft = (activeDayIdx - 3) * 56;
+        }
+      }, [activeDayIdx]);
+
+      async function saveDayPatch(dayIndex, patch) {
+        if (!user) return;
+        await mergeSet(dayRef(user.uid, dayIndex), { ...patch, updatedAt: Date.now() });
+      }
+
+      const taskKey = (t) => (t.behaviorKey || normalizeKey(t.name));
+
+      const getTaskWindow = (t) => {
+        const start = t.startDay ?? 0;
+        const end = (t.endDay !== undefined) ? t.endDay : activeDayIdx;
+        const effectiveEnd = Math.min(activeDayIdx, end);
+        return { start, end, effectiveEnd };
+      };
+
+      // =====================
+      // LOAD + MIGRATION
+      // =====================
+      useEffect(() => {
+        const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
+          setUser(currentUser);
+          setAuthLoading(false);
+
+          if (!currentUser) {
+            isDataLoaded.current = false;
+            return;
+          }
+
+          setDataLoading(true);
+          try {
+            const uid = currentUser.uid;
+            const cfgRef = userYearConfigRef(uid);
+            const cfg = await safeGet(cfgRef);
+
+            let cfgCategories = INITIAL_CATEGORIES;
+            let cfgTasks = INITIAL_TASKS;
+
+            // ✅ UPDATE 7B + 7C:
+            // If cfg missing -> write empty arrays + onboarded false (do NOT inject defaults)
+            // If cfg exists but not onboarded -> gate onboarding
+            if (cfg) {
+              cfgCategories = cfg.categories || INITIAL_CATEGORIES;
+              cfgTasks = cfg.tasks || INITIAL_TASKS;
+              setCategories(cfgCategories);
+              setTasks(cfgTasks);
+
+              // load profile if present
+              if (cfg.profile) setProfile(cfg.profile);
+              setNeedsOnboarding(false);
+            } else {
+              await mergeSet(cfgRef, {
+                categories: [],
+                tasks: [],
+                onboarded: false,
+                migratedDoneKeysV1: false
+              });
+              setCategories([]);
+              setTasks([]);
+              cfgTasks = [];
+              setNeedsOnboarding(true);
+            }
+
+            // ensure behaviorKey exists, but DO NOT renormalize existing keys
+            const ensuredTasks = (cfgTasks || []).map(t => ({
+              ...t,
+              behaviorKey: t.behaviorKey ? String(t.behaviorKey) : normalizeKey(t.name)
+            }));
+            setTasks(ensuredTasks);
+            await mergeSet(cfgRef, { tasks: ensuredTasks });
+
+            const daysSnap = await daysCollectionRef(uid).get();
+            const nNotes = {}, nHealth = {}, nLogs = {};
+
+            const needsWriteback = !(cfg && cfg.migratedDoneKeysV1 === true);
+
+            const idToKey = {};
+            ensuredTasks.forEach(t => { idToKey[t.id] = taskKey(t); });
+
+            const updates = []; // {idx, doneKeys, doneOrphans}
+            daysSnap.forEach(doc => {
+              const idx = Number(doc.id);
+              const d = doc.data();
+
+              if (d.note) nNotes[idx] = d.note;
+              if (d.health) nHealth[idx] = {
+                in: Number(d.health.in) || 0,
+                out: Number(d.health.out) || 0,
+                weight: d.health.weight
+              };
+
+              const existingKeys = sortUniqueStrings(Array.isArray(d.doneKeys) ? d.doneKeys : []);
+              const existingOrphans = sortUniqueStrings(Array.isArray(d.doneOrphans) ? d.doneOrphans : []);
+
+              const keys = new Set(existingKeys);
+              const orphans = new Set(existingOrphans);
+
+              // Convert legacy doneTasks -> keys; preserve unknown IDs as orphans
+              const legacy = Array.isArray(d.doneTasks) ? d.doneTasks : [];
+              if (legacy.length) {
+                legacy.forEach(tid => {
+                  const k = idToKey[tid];
+                  if (k) keys.add(String(k));
+                  else orphans.add(String(tid));
+                });
+              }
+
+              const nextKeys = Array.from(keys).sort();
+              const nextOrphans = Array.from(orphans).sort();
+
+              // Build logs by key (from nextKeys)
+              nextKeys.forEach(k => {
+                if (!nLogs[k]) nLogs[k] = {};
+                nLogs[k][idx] = 1;
+              });
+
+              // write back ONLY when something actually changed
+              if (needsWriteback) {
+                const keysChanged = !arraysEqual(existingKeys, nextKeys);
+                const orphansChanged = !arraysEqual(existingOrphans, nextOrphans);
+                const legacyExists = legacy.length > 0;
+
+                if (legacyExists || keysChanged || orphansChanged) {
+                  updates.push({ idx, doneKeys: nextKeys, doneOrphans: nextOrphans });
+                }
+              }
+            });
+
+            setNotes(nNotes);
+            setHealthLogs(nHealth);
+            setLogs(nLogs);
+
+            if (needsWriteback && updates.length > 0) {
+              const BATCH_LIMIT = 450;
+              for (let i = 0; i < updates.length; i += BATCH_LIMIT) {
+                const chunk = updates.slice(i, i + BATCH_LIMIT);
+                const batch = db.batch();
+                chunk.forEach(u => {
+                  batch.set(
+                    dayRef(uid, u.idx),
+                    { doneKeys: u.doneKeys, doneOrphans: u.doneOrphans, migratedAt: Date.now() },
+                    { merge: true }
+                  );
+                });
+                await batch.commit();
+              }
+              await mergeSet(cfgRef, { migratedDoneKeysV1: true });
+            } else {
+              if (!cfg || cfg.migratedDoneKeysV1 !== true) {
+                await mergeSet(cfgRef, { migratedDoneKeysV1: true });
+              }
+            }
+
+            isDataLoaded.current = true;
+
+          } catch (e) {
+            console.error(e);
+          } finally {
+            setDataLoading(false);
+          }
+        });
+        return () => unsubscribe();
+      }, []);
+
+      // Persist categories/tasks changes
+      useEffect(() => {
+        if (!user || !isDataLoaded.current) return;
+        const t = setTimeout(() => mergeSet(userYearConfigRef(user.uid), { categories, tasks, profile }), 600);
+        return () => clearTimeout(t);
+      }, [categories, tasks, profile, user]);
+
+      // =====================
+      // TASK + CATEGORY MANAGEMENT
+      // =====================
+      const addTaskResolved = (catId, rawName, mode) => {
+        const baseKey = normalizeKey(rawName);
+        const existing = tasks.find(t => taskKey(t) === baseKey);
+
+        if (mode === 'restore') {
+          if (existing) {
+            setTasks(prev => prev.map(t => {
+              if (taskKey(t) !== baseKey) return t;
+              return {
+                ...t,
+                catId,
+                name: rawName,
+                behaviorKey: baseKey,     // keep stable key
+                endDay: undefined,
+                startDay: (t.startDay ?? activeDayIdx)
+              };
+            }));
+          } else {
+            setTasks(prev => [...prev, {
+              id: `t-${Date.now()}`,
+              catId,
+              name: rawName,
+              startDay: activeDayIdx,
+              behaviorKey: baseKey
+            }]);
+          }
+          return;
+        }
+
+        // fresh: new unique key so history does NOT mix
+        const freshKey = makeFreshKey(baseKey, activeDayIdx);
+        setTasks(prev => [...prev, {
+          id: `t-${Date.now()}`,
+          catId,
+          name: rawName,
+          startDay: activeDayIdx,
+          behaviorKey: freshKey
+        }]);
+      };
+
+      const addTask = (catId) => {
+        const raw = (newTaskNames[catId] || '').trim();
+        if (!raw) return;
+
+        const baseKey = normalizeKey(raw);
+        const existing = tasks.find(t => taskKey(t) === baseKey);
+
+        if (existing && existing.catId !== catId) {
+          openChoice({
+            iconName: "Shuffle",
+            title: "Same task exists in another category",
+            description: `This task already exists as "${existing.name}" in another category. What do you want?`,
+            primaryText: "Move it here (keep history)",
+            secondaryText: "Create fresh from today",
+            onPrimary: () => { closeChoice(); addTaskResolved(catId, raw, 'restore'); },
+            onSecondary: () => { closeChoice(); addTaskResolved(catId, raw, 'fresh'); }
+          });
+        } else if (existing) {
+          openChoice({
+            iconName: "RotateCcw",
+            title: "Task already exists",
+            description: `We found a task with the same key. Do you want to continue its old history or restart fresh from today?`,
+            primaryText: "Continue old history",
+            secondaryText: "Restart fresh from today",
+            onPrimary: () => { closeChoice(); addTaskResolved(catId, raw, 'restore'); },
+            onSecondary: () => { closeChoice(); addTaskResolved(catId, raw, 'fresh'); }
+          });
+        } else {
+          addTaskResolved(catId, raw, 'restore');
+        }
+
+        setNewTaskNames(p => ({ ...p, [catId]: '' }));
+      };
+
+      const archiveTask = (taskId) => {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, endDay: activeDayIdx } : t));
+      };
+
+      const restoreTaskByKey = (key) => {
+        setTasks(prev => prev.map(t => taskKey(t) === key ? { ...t, endDay: undefined } : t));
+      };
+
+      const permanentlyDeleteTaskByKey = async (key) => {
+        if (!user) return;
+        const uid = user.uid;
+
+        setTasks(prev => prev.filter(t => taskKey(t) !== key));
+        setLogs(prev => {
+          const copy = { ...prev };
+          delete copy[key];
+          return copy;
+        });
+
+        const snap = await daysCollectionRef(uid).get();
+        const updates = [];
+        snap.forEach(doc => {
+          const d = doc.data();
+          const idx = Number(doc.id);
+          const doneKeys = Array.isArray(d.doneKeys) ? d.doneKeys : [];
+          if (doneKeys.includes(key)) {
+            updates.push({ idx, doneKeys: doneKeys.filter(k => k !== key) });
+          }
+        });
+
+        const BATCH_LIMIT = 450;
+        for (let i = 0; i < updates.length; i += BATCH_LIMIT) {
+          const chunk = updates.slice(i, i + BATCH_LIMIT);
+          const batch = db.batch();
+          chunk.forEach(u => {
+            batch.set(dayRef(uid, u.idx), { doneKeys: u.doneKeys, updatedAt: Date.now() }, { merge: true });
+          });
+          await batch.commit();
+        }
+      };
+
+      const addCategory = () => {
+        if (!newCatName.trim()) return;
+        setCategories(prev => [...prev, {
+          id: `cat-${Date.now()}`,
+          name: newCatName.toUpperCase(),
+          color: '#10b981'
+        }]);
+        setNewCatName('');
+      };
+
+      // UPDATED: Archive category should NOT overwrite older task endDay
+      const archiveCategory = (id) => {
+        setCategories(prev => prev.map(c => c.id === id ? { ...c, endDay: c.endDay ?? activeDayIdx } : c));
+        setTasks(prev => prev.map(t => {
+          if (t.catId !== id) return t;
+          return { ...t, endDay: t.endDay ?? activeDayIdx };
+        }));
+      };
+
+      // UPDATED: Restore category restores ONLY tasks that were archived due to the category archive day
+      const restoreCategory = (id) => {
+        const cat = categories.find(c => c.id === id);
+        const catEnd = cat?.endDay;
+
+        setCategories(prev => prev.map(c => c.id === id ? { ...c, endDay: undefined } : c));
+
+        // restore tasks that match that category-archive timestamp
+        if (catEnd !== undefined) {
+          setTasks(prev => prev.map(t => {
+            if (t.catId !== id) return t;
+            if (t.endDay !== catEnd) return t; // keep independently-archived tasks archived
+            return { ...t, endDay: undefined };
+          }));
+        }
+      };
+
+      const permanentlyDeleteCategory = async (catId) => {
+        const keysToDelete = Array.from(new Set(tasks.filter(t => t.catId === catId).map(t => taskKey(t))));
+
+        setCategories(prev => prev.filter(c => c.id !== catId));
+        setTasks(prev => prev.filter(t => t.catId !== catId));
+        setLogs(prev => {
+          const copy = { ...prev };
+          keysToDelete.forEach(k => { delete copy[k]; });
+          return copy;
+        });
+
+        if (!user) return;
+        const uid = user.uid;
+
+        const snap = await daysCollectionRef(uid).get();
+        const updates = [];
+        snap.forEach(doc => {
+          const d = doc.data();
+          const idx = Number(doc.id);
+          const doneKeys = Array.isArray(d.doneKeys) ? d.doneKeys : [];
+          const next = doneKeys.filter(k => !keysToDelete.includes(k));
+          if (next.length !== doneKeys.length) {
+            updates.push({ idx, doneKeys: next });
+          }
+        });
+
+        const BATCH_LIMIT = 450;
+        for (let i = 0; i < updates.length; i += BATCH_LIMIT) {
+          const chunk = updates.slice(i, i + BATCH_LIMIT);
+          const batch = db.batch();
+          chunk.forEach(u => {
+            batch.set(dayRef(uid, u.idx), { doneKeys: u.doneKeys, updatedAt: Date.now() }, { merge: true });
+          });
+          await batch.commit();
+        }
+      };
+
+      // =====================
+      // HABIT TOGGLE (doneKeys)
+      // =====================
+      const toggleHabit = async (task, dayIndex) => {
+        if (dayIndex > activeDayIdx) return;
+
+        const key = taskKey(task);
+        const { start, effectiveEnd } = getTaskWindow(task);
+        if (dayIndex < start || dayIndex > effectiveEnd) return;
+
+        // 1) Build next logs safely and also compute doneKeys from the same "next" state
+        let computedDoneKeys = null;
+
+        setLogs(prev => {
+          // clone this task's day logs
+          const kLogs = prev[key] ? { ...prev[key] } : {};
+
+          // toggle
+          const isDone = kLogs[dayIndex] === 1;
+          kLogs[dayIndex] = isDone ? 0 : 1;
+
+          // next logs state
+          const next = { ...prev, [key]: kLogs };
+
+          // 2) compute doneKeys for this day using NEXT logs (not old logs)
+          const doneKeys = [];
+          // ✅ Change 3: Update toggleHabit to use tasksRef.current
+          tasksRef.current.forEach(t => {
+            const k = taskKey(t);
+            const s = t.startDay ?? 0;
+            const e = (t.endDay !== undefined) ? t.endDay : activeDayIdx;
+            const effE = Math.min(activeDayIdx, e);
+
+            if (dayIndex < s || dayIndex > effE) return;
+            if (next[k]?.[dayIndex] === 1) doneKeys.push(k);
+          });
+
+          computedDoneKeys = sortUniqueStrings(doneKeys);
+          return next;
+        });
+
+        // 3) Save to Firestore
+        await Promise.resolve();
+        if (computedDoneKeys) {
+          await saveDayPatch(dayIndex, { doneKeys: computedDoneKeys });
+        }
+      };
+
+      const updateNote = async (d, txt) => {
+        setNotes(p => ({ ...p, [d]: txt }));
+        await saveDayPatch(d, { note: txt });
+      };
+
+      const updateHealth = async (d, f, v) => {
+        const val = ['in', 'out', 'weight'].includes(f) ? (Number(v) || 0) : v;
+        setHealthLogs(p => ({ ...p, [d]: { ...(p[d] || {}), [f]: val } }));
+        await saveDayPatch(d, { health: { ...(healthLogs[d] || {}), [f]: val } });
+      };
+
+      const addToHealth = async (dayIndex, field, addVal) => {
+        const current = Number(healthLogs[dayIndex]?.[field] || 0);
+        await updateHealth(dayIndex, field, current + addVal);
+      };
+// =====================
+// VISIBLE MONTH DAYS (NEW)
+// =====================
+const visibleMonth = MONTHS.find(m => m.month === activeMonth);
+
+const visibleDayIndices = useMemo(() => {
+  if (!visibleMonth) return [];
+  const maxAllowed = activeDayIdx; // block future days
+  const start = visibleMonth.startIdx;
+  const end = Math.min(visibleMonth.endIdx, maxAllowed);
+
+  const days = [];
+  for (let i = start; i <= end; i++) days.push(i);
+  return days;
+}, [visibleMonth, activeDayIdx]);
+      // =====================
+      // DERIVED LISTS
+      // =====================
+      const activeCategories = useMemo(() => categories.filter(c => c.endDay === undefined), [categories]);
+      const archivedCategories = useMemo(() => categories.filter(c => c.endDay !== undefined), [categories]);
+
+      const trackerTasksByCat = useMemo(() => {
+        const by = {};
+        categories.forEach(c => { by[c.id] = { active: [], archived: [] }; });
+        tasks.forEach(t => {
+          if (!by[t.catId]) by[t.catId] = { active: [], archived: [] };
+          (t.endDay === undefined ? by[t.catId].active : by[t.catId].archived).push(t);
+        });
+        return by;
+      }, [tasks, categories]);
+
+      const allTaskNamesUnique = useMemo(() => {
+        const map = new Map(); // key -> displayName
+        tasks.forEach(t => {
+          const k = taskKey(t);
+          if (!map.has(k)) map.set(k, t.name);
+        });
+        return Array.from(map.values());
+      }, [tasks]);
+
+      // =====================
+      // STATS
+      // =====================
+      const stats = useMemo(() => {
+        let totalDone = 0;
+        let totalPossible = 0;
+
+        const getTaskDays = (t) => {
+          const start = t.startDay ?? 0;
+          const end = (t.endDay !== undefined) ? t.endDay : activeDayIdx;
+          const effectiveEnd = Math.min(activeDayIdx, end);
+          if (effectiveEnd < start) return { possible: 0, days: [] };
+          const count = effectiveEnd - start + 1;
+          const days = [];
+          for (let i = start; i <= effectiveEnd; i++) days.push(i);
+          return { possible: count, days };
+        };
+
+        // ✅ UPDATE 6: categoryStats now includes done/possible
+        const categoryStats = categories.map(cat => {
+          let catPossible = 0;
+          let catDone = 0;
+
+          const catTasks = tasks.filter(t => t.catId === cat.id);
+          catTasks.forEach(t => {
+            const { possible, days } = getTaskDays(t);
+            catPossible += possible;
+            const k = taskKey(t);
+            days.forEach(d => { if (logs[k]?.[d] === 1) catDone++; });
+          });
+
+          totalPossible += catPossible;
+          totalDone += catDone;
+
+          return {
+            name: cat.endDay !== undefined ? `${cat.name} (ARCH)` : cat.name,
+            value: catPossible > 0 ? Math.round((catDone / catPossible) * 100) : 0,
+            done: catDone,
+            possible: catPossible
+          };
+        });
+
+        // ✅ UPDATE 1: curW should start as last-known weight up to activeDayIdx (fallback 72 only if never entered)
+        let curW = null;
+        for (let i = activeDayIdx; i >= 0; i--) {
+          const w = healthLogs[i]?.weight;
+          if (w !== undefined && w !== null && Number(w) > 0) { curW = Number(w); break; }
+        }
+        if (curW === null) curW = 72;
+
+        const healthChartData = [];
+        const sIdx = Math.max(0, activeDayIdx - 30);
+        for (let i = sIdx; i <= activeDayIdx; i++) {
+          const h = healthLogs[i] || {};
+          const intake = Number(h.in || 0);
+          const burn = Number(h.out || 0);
+          const netKcal = intake > 0 ? (intake - (1800 + burn)) : 0;
+          if (h.weight) curW = Number(h.weight);
+          healthChartData.push({ name: i, date: getDayDetails(i).dateStr, netKcal, weight: curW });
+        }
+        if (!healthChartData.length) healthChartData.push({ name: 0, date: '', netKcal: 0, weight: curW });
+
+        // Streak analytics (dedupe by behaviorKey)
+        const taskAnalytic = [];
+        const keys = Array.from(new Set(tasks.map(t => taskKey(t))));
+        keys.forEach(k => {
+          const activeName = tasks.find(t => taskKey(t) === k && t.endDay === undefined)?.name;
+          const anyName = tasks.find(t => taskKey(t) === k)?.name || k;
+
+          const tLogs = logs[k] || {};
+          let current = 0, max = 0, tmp = 0;
+
+          for (let i = 0; i <= activeDayIdx; i++) {
+            if (tLogs[i] === 1) { tmp++; max = Math.max(max, tmp); } else tmp = 0;
+          }
+          for (let i = activeDayIdx; i >= 0; i--) { if (tLogs[i] === 1) current++; else break; }
+
+          taskAnalytic.push({ name: activeName || anyName, current, max });
+        });
+
+        // ✅ UPDATE 5: removed failuresByDay completely
+
+        // RESILIENCE SCORE
+        const keysForResilience = Array.from(new Set(tasks.map(t => taskKey(t))));
+        const resilienceByKey = [];
+
+        keysForResilience.forEach(k => {
+          const tLogs = logs[k] || {};
+
+          const doneDays = [];
+          for (let i = 0; i <= activeDayIdx; i++) {
+            if (tLogs[i] === 1) doneDays.push(i);
+          }
+
+          if (doneDays.length === 0) {
+            resilienceByKey.push({ key: k, score: 0 });
+            return;
+          }
+
+          if (doneDays.length === 1) {
+            resilienceByKey.push({ key: k, score: 100 });
+            return;
+          }
+
+          const comebackScores = [];
+          for (let j = 1; j < doneDays.length; j++) {
+            const prev = doneDays[j - 1];
+            const cur = doneDays[j];
+            const missedDays = Math.max(0, cur - prev - 1);
+            const score = (missedDays <= 1) ? 100 : (100 / missedDays);
+            comebackScores.push(score);
+          }
+
+          const avg = comebackScores.reduce((s, v) => s + v, 0) / comebackScores.length;
+          resilienceByKey.push({ key: k, score: avg });
+        });
+
+        const overallResilience = resilienceByKey.length
+          ? (resilienceByKey.reduce((s, x) => s + x.score, 0) / resilienceByKey.length)
+          : 0;
+
+        // ✅ UPDATE 8: BMI insight
+        const heightM = Number(profile?.height || 0) / 100;
+        const lastWeightForBMI = healthChartData.length ? (healthChartData[healthChartData.length - 1]?.weight || curW) : curW;
+        const bmi = heightM ? (lastWeightForBMI / (heightM * heightM)) : 0;
+
+        return {
+          overallProgress: totalPossible > 0 ? Math.round((totalDone / totalPossible) * 100) : 0,
+          categoryStats,
+          taskAnalytic,
+          healthChartData,
+          bestStreak: taskAnalytic.length > 0 ? Math.max(...taskAnalytic.map(t => t.max)) : 0,
+          resilience: Math.round(overallResilience),
+          bmi: Math.round(bmi * 10) / 10
+        };
+      }, [logs, categories, tasks, activeDayIdx, healthLogs, profile]);
+
+      // =====================
+      // RADAR TOOLTIP (✅ UPDATE 6)
+      // =====================
+      const RadarTooltip = ({ active, payload }) => {
+        if (!active || !payload || !payload.length) return null;
+        const p = payload[0]?.payload;
+        if (!p) return null;
+        return (
+          <div className="bg-[#0d0f12] border border-white/10 rounded-xl px-3 py-2 shadow-2xl">
+            <div className="text-xs font-black text-slate-200">{p.name}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Tasks done: <span className="text-emerald-300 font-black">{p.done}</span> / {p.possible}</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">{p.value}%</div>
+          </div>
+        );
+      };
+      RadarTooltip.propTypes = { active: PropTypes.bool, payload: PropTypes.array };
+
+      // =====================
+      // ONBOARDING SUBMIT (✅ UPDATE 7C)
+      // =====================
+      const finishOnboarding = async () => {
+  setNeedsOnboarding(false);
+};
+              // =====================
+      // GOAL WEIGHT STAR (Health Engine)
+      // =====================
+      const GoalWeightStar = ({ viewBox, payload }) => {
+        const { x, y } = viewBox || {};
+        if (x == null || y == null) return null;
+
+        const nearGoal = payload?.nearGoal === true;
+
+        return (
+          <text
+            x={x}
+            y={y - 6}
+            textAnchor="middle"
+            fontSize="16"
+            fill="#facc15"
+            style={{
+              filter: nearGoal
+                ? 'drop-shadow(0 0 10px rgba(250,204,21,0.9))'
+                : 'drop-shadow(0 0 4px rgba(250,204,21,0.5))',
+              transition: 'filter 0.3s ease'
+            }}
+          >
+            ★
+          </text>
+        );
+      };
+
+      // =====================
+      // GUARDS
+      // =====================
+      if (authLoading) return (
+        <div className="h-screen bg-[#0d0f12] flex items-center justify-center">
+          <div className="spinner"></div>
+        </div>
+      );
+      if (!user) return <AuthScreen />;
+
+      // ✅ UPDATE 7C: Onboarding gate before main UI
+      // Keep structure identical otherwise.
+      return (
+        <div className="flex h-screen bg-[#0d0f12] text-slate-200 font-sans overflow-hidden">
+
+          {/* Onboarding permanently disabled */}
+
+          <ConfirmModal
+            open={confirmState.open}
+            title={confirmState.title}
+            description={confirmState.description}
+            dangerText={confirmState.dangerText}
+            onClose={closeConfirm}
+            onConfirm={async () => {
+              try {
+                if (confirmState.onConfirm) await confirmState.onConfirm();
+              } finally {
+                closeConfirm();
+              }
+            }}
+          />
+
+          <ChoiceModal
+            open={choiceState.open}
+            title={choiceState.title}
+            description={choiceState.description}
+            primaryText={choiceState.primaryText}
+            secondaryText={choiceState.secondaryText}
+            iconName={choiceState.iconName}
+            onClose={closeChoice}
+            onPrimary={() => { try { choiceState.onPrimary && choiceState.onPrimary(); } catch(e){} }}
+            onSecondary={() => { try { choiceState.onSecondary && choiceState.onSecondary(); } catch(e){} }}
+          />
+
+          <nav className="w-16 flex-shrink-0 bg-[#15191e] border-r border-white/5 flex flex-col items-center py-6 gap-6 z-50">
+            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+              <LucideIcon name="Activity" size={24} />
+            </div>
+
+            <button
+              onClick={() => { setView('tracker'); setIsManageOpen(false); }}
+              className={`p-3 rounded-xl transition-colors ${view === 'tracker' && !isManageOpen ? 'bg-emerald-500/10 text-emerald-400' : 'text-slate-500 hover:bg-white/5'}`}
+              title="Tracker"
+            >
+              <LucideIcon name="CalendarDays" size={22} />
+            </button>
+
+            <button
+              onClick={() => { setView('dashboard'); setIsManageOpen(false); }}
+              className={`p-3 rounded-xl transition-colors ${view === 'dashboard' ? 'bg-blue-500/10 text-blue-400' : 'text-slate-500 hover:bg-white/5'}`}
+              title="Insights"
+            >
+              <LucideIcon name="BarChart3" size={22} />
+            </button>
+
+            <button
+              onClick={() => setIsManageOpen(!isManageOpen)}
+              className={`p-3 rounded-xl transition-colors ${isManageOpen ? 'bg-purple-500/10 text-purple-400' : 'text-slate-500 hover:bg-white/5'}`}
+              title="Settings"
+            >
+              <LucideIcon name="Settings" size={22} />
+            </button>
+
+            <div className="mt-auto flex flex-col gap-4 items-center">
+              <button
+                onClick={() => auth.signOut()}
+                className="p-3 rounded-xl text-slate-500 hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                title="Logout"
+              >
+                <LucideIcon name="LogOut" size={22} />
+              </button>
+            </div>
+          </nav>
+
+          <div className="flex-grow flex flex-col min-w-0 relative">
+            <header className="h-16 border-b border-white/5 bg-[#0d0f12]/80 backdrop-blur-md flex items-center justify-between px-8">
+              <div className="flex items-center gap-4">
+                <h1 className="text-lg font-bold tracking-tight">
+                  {isManageOpen ? 'Configuration' : view === 'tracker' ? '2026 Protocol' : 'Insights'}
+                </h1>
+                <div className="h-4 w-px bg-white/10" />
+                <span className="text-sm text-slate-500 font-medium">{YEAR} Roadmap</span>
+                {dataLoading && <span className="text-xs text-emerald-500 animate-pulse ml-2">Syncing...</span>}
+              </div>
+
+              {!isManageOpen && view === 'tracker' && (
+                <div className="flex items-center gap-4">
+                  <div className="text-[10px] font-mono text-slate-500 flex flex-col items-end">
+                    <span className="uppercase font-bold text-emerald-500">System Live</span>
+                    <span>Index updates every 60s</span>
+                  </div>
+
+                 <button
+  onClick={() => setActiveMonth(currentMonth)}
+  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg text-sm font-semibold transition-all"
+>
+  <LucideIcon name="Target" size={14} /> This Month
+</button>
+
+<select
+  value={activeMonth}
+  onChange={(e) => setActiveMonth(Number(e.target.value))}
+  className="bg-[#0d0f12] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-300"
+>
+  {MONTHS
+    .filter(m => m.month <= currentMonth)   // ❌ hides future months
+    .map(m => (
+      <option key={m.month} value={m.month}>
+        {m.label}
+      </option>
+    ))}
+</select>
+
+                  <button
+                    onClick={() => setShowArchivedTracker(v => !v)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all border ${showArchivedTracker ? 'border-white/20 bg-white/5 text-slate-200' : 'border-white/10 bg-transparent text-slate-500 hover:bg-white/5'}`}
+                    title="Toggle archived rows"
+                  >
+                    <LucideIcon name={showArchivedTracker ? "Eye" : "EyeOff"} size={14} />
+                    Archived
+                  </button>
+                </div>
+              )}
+            </header>
+
+            <div className="flex-grow overflow-auto relative">
+
+              {/* =====================
+                  SETTINGS
+              ====================== */}
+              {isManageOpen ? (
+                <div className="p-8 max-w-5xl mx-auto space-y-8">
+
+                  {/* Add Category */}
+                  <section className="bg-[#15191e] p-8 rounded-3xl border border-white/5 shadow-2xl">
+                    <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                      <LucideIcon name="Plus" className="text-emerald-500" size={20} /> Add Category
+                    </h2>
+                    <div className="flex gap-4 items-end">
+                      <div className="flex-grow space-y-2">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Name</label>
+                        <input
+                          type="text"
+                          value={newCatName}
+                          onChange={(e) => setNewCatName(e.target.value)}
+                          placeholder="e.g., FITNESS"
+                          className="w-full bg-[#0d0f12] border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <button onClick={addCategory} className="h-[46px] px-6 bg-emerald-500 hover:bg-emerald-400 text-[#0d0f12] font-black rounded-xl transition-all">
+                        Create
+                      </button>
+                    </div>
+                  </section>
+{/* =====================
+    PROFILE SETTINGS
+===================== */}
+<section className="bg-[#15191e] p-8 rounded-3xl border border-white/5 shadow-2xl">
+  <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+    <LucideIcon name="User" className="text-blue-500" size={20} />
+    Profile
+  </h2>
+
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+    {/* Height */}
+    <div>
+      <label className="text-[10px] font-bold uppercase text-slate-500">
+        Height (cm)
+      </label>
+      <input
+        type="number"
+        className="mt-2 w-full bg-[#0d0f12] border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500"
+        value={profile.height || ''}
+        onChange={(e) =>
+          setProfile(p => ({ ...p, height: e.target.value }))
+        }
+        placeholder="e.g. 175"
+      />
+    </div>
+
+    {/* Goal Weight (optional but logical) */}
+    <div>
+      <label className="text-[10px] font-bold uppercase text-slate-500">
+        Goal Weight (kg)
+      </label>
+      <input
+        type="number"
+        className="mt-2 w-full bg-[#0d0f12] border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500"
+        value={profile.goalWeight || ''}
+        onChange={(e) =>
+          setProfile(p => ({ ...p, goalWeight: e.target.value }))
+        }
+        placeholder="e.g. 68"
+      />
+    </div>
+
+  </div>
+</section>
+
+                  {/* Active Categories */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {activeCategories.map(cat => {
+                      const q = (newTaskNames[cat.id] || '').trim().toLowerCase();
+                      const suggestions = (q.length < 2) ? [] : allTaskNamesUnique
+                        .filter(n => n.toLowerCase().includes(q))
+                        .slice(0, 6);
+
+                      const catActiveTasks = (trackerTasksByCat[cat.id]?.active || []);
+                      const catArchivedTasks = (trackerTasksByCat[cat.id]?.archived || []);
+                      const isArchOpen = archivedTaskOpen[cat.id] === true;
+
+                      return (
+                        <div key={cat.id} className="bg-[#15191e] rounded-3xl border border-white/5 overflow-hidden flex flex-col">
+                          <div className="p-5 flex items-center justify-between border-b border-white/5" style={{ backgroundColor: `${cat.color}10` }}>
+                            <span className="font-black text-sm" style={{ color: cat.color }}>{cat.name}</span>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => archiveCategory(cat.id)}
+                                className="p-2 text-slate-600 hover:text-amber-300"
+                                title="Archive category"
+                              >
+                                <LucideIcon name="Archive" size={16} />
+                              </button>
+
+                              <button
+                                onClick={() => openConfirm({
+                                  title: `Permanently delete "${cat.name}"?`,
+                                  description: `This will remove the category AND permanently remove its tasks from analytics by scrubbing them across all days. This cannot be undone.`,
+                                  dangerText: "Delete permanently",
+                                  onConfirm: async () => permanentlyDeleteCategory(cat.id)
+                                })}
+                                className="p-2 text-slate-600 hover:text-red-400"
+                                title="Permanent delete"
+                              >
+                                <LucideIcon name="Trash2" size={16} />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="p-5 space-y-3">
+                            {/* Active tasks */}
+                            {catActiveTasks.map(task => (
+                              <div key={task.id} className="flex items-center justify-between bg-[#0d0f12] p-3 rounded-xl border border-white/5 group">
+                                <div className="min-w-0">
+                                  <div className="text-xs font-medium text-slate-300 truncate">{task.name}</div>
+                                  <div className="text-[10px] text-slate-600 kbd mt-0.5">{taskKey(task)}</div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => archiveTask(task.id)}
+                                    className="p-1.5 text-slate-700 hover:text-amber-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    title="Archive task"
+                                  >
+                                    <LucideIcon name="Archive" size={14} />
+                                  </button>
+
+                                  <button
+                                    onClick={() => openConfirm({
+                                      title: `Permanently delete "${task.name}"?`,
+                                      description: `This will remove it from interface AND scrub its history from analytics across all days. This cannot be undone.`,
+                                      dangerText: "Delete permanently",
+                                      onConfirm: async () => permanentlyDeleteTaskByKey(taskKey(task))
+                                    })}
+                                    className="p-1.5 text-slate-700 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    title="Permanent delete"
+                                  >
+                                    <LucideIcon name="Trash2" size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+
+                            {/* Archived tasks collapsible */}
+                            {catArchivedTasks.length > 0 && (
+                              <div className="pt-2">
+                                <button
+                                  onClick={() => setArchivedTaskOpen(p => ({ ...p, [cat.id]: !p[cat.id] }))}
+                                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-bold"
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <LucideIcon name={isArchOpen ? "ChevronDown" : "ChevronRight"} size={16} />
+                                    Archived Tasks ({catArchivedTasks.length})
+                                  </span>
+                                  <span className="text-[10px] text-slate-500">Restore / Delete</span>
+                                </button>
+
+                                {isArchOpen && (
+                                  <div className="mt-3 space-y-2">
+                                    {catArchivedTasks.map(task => (
+                                      <div key={task.id} className="flex items-center justify-between bg-[#0d0f12] p-3 rounded-xl border border-white/5">
+                                        <div className="min-w-0">
+                                          <div className="text-xs font-medium text-slate-400 truncate">{task.name}</div>
+                                          <div className="text-[10px] text-slate-600 kbd mt-0.5">{taskKey(task)}</div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            onClick={() => openChoice({
+                                              iconName: "RotateCcw",
+                                              title: "Restore task",
+                                              description: "Do you want to continue old history or restart fresh from today?",
+                                              primaryText: "Continue old history",
+                                              secondaryText: "Restart fresh",
+                                              onPrimary: () => { closeChoice(); restoreTaskByKey(taskKey(task)); },
+                                              onSecondary: () => {
+                                                closeChoice();
+                                                addTaskResolved(cat.id, task.name, 'fresh');
+                                              }
+                                            })}
+                                            className="px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-[11px] font-black border border-emerald-500/20"
+                                            title="Restore options"
+                                          >
+                                            Restore
+                                          </button>
+                                          <button
+                                            onClick={() => openConfirm({
+                                              title: `Permanently delete "${task.name}"?`,
+                                              description: `This will scrub its history from all dates and remove it from analytics.`,
+                                              dangerText: "Delete permanently",
+                                              onConfirm: async () => permanentlyDeleteTaskByKey(taskKey(task))
+                                            })}
+                                            className="px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 text-[11px] font-black border border-red-500/20"
+                                            title="Delete permanently"
+                                          >
+                                            Delete
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Add task with suggestions */}
+                            <div className="pt-3">
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  placeholder="Add task... (type 2+ chars for suggestions)"
+                                  value={newTaskNames[cat.id] || ''}
+                                  onChange={(e) => setNewTaskNames(p => ({ ...p, [cat.id]: e.target.value }))}
+                                  className="flex-grow bg-[#0d0f12] border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                                  onKeyDown={e => e.key === 'Enter' && addTask(cat.id)}
+                                />
+                                <button onClick={() => addTask(cat.id)} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg border border-white/10">
+                                  <LucideIcon name="Plus" size={16} />
+                                </button>
+                              </div>
+
+                              {suggestions.length > 0 && (
+                                <div className="mt-2 bg-[#0d0f12] border border-white/10 rounded-xl overflow-hidden">
+                                  {suggestions.map(s => (
+                                    <button
+                                      key={s}
+                                      className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/5 flex items-center justify-between"
+                                      onClick={() => setNewTaskNames(p => ({ ...p, [cat.id]: s }))}
+                                    >
+                                      <span className="truncate">{s}</span>
+                                      <span className="text-[10px] text-slate-600 kbd ml-2">{normalizeKey(s)}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Archived categories collapsible */}
+                  <section className="bg-[#15191e] rounded-3xl border border-white/5 shadow-2xl overflow-hidden">
+                    <button
+                      onClick={() => setShowArchivedManage(v => !v)}
+                      className="w-full p-6 flex items-center justify-between hover:bg-white/5 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-300">
+                          <LucideIcon name="Archive" size={18} />
+                        </div>
+                        <div className="text-left">
+                          <div className="text-white font-black">Archived</div>
+                          <div className="text-xs text-slate-500">Restore or permanently delete categories (analytics-safe unless deleted permanently)</div>
+                        </div>
+                      </div>
+                      <LucideIcon name={showArchivedManage ? "ChevronDown" : "ChevronRight"} size={20} className="text-slate-500" />
+                    </button>
+
+                    {showArchivedManage && (
+                      <div className="p-6 border-t border-white/5 space-y-4">
+                        {archivedCategories.length === 0 ? (
+                          <div className="text-sm text-slate-500">No archived categories.</div>
+                        ) : archivedCategories.map(cat => {
+                          const isOpen = archivedCatOpen[cat.id] === true;
+                          const catTasks = (trackerTasksByCat[cat.id]?.archived || []);
+                          return (
+                            <div key={cat.id} className="bg-[#0d0f12] border border-white/10 rounded-2xl overflow-hidden">
+                              <button
+                                onClick={() => setArchivedCatOpen(p => ({ ...p, [cat.id]: !p[cat.id] }))}
+                                className="w-full px-4 py-4 flex items-center justify-between hover:bg-white/5 transition-colors"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }} />
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-black text-slate-200 truncate">{cat.name}</div>
+                                    <div className="text-[10px] text-slate-600">Archived Day: {cat.endDay ?? '-'}</div>
+                                  </div>
+                                </div>
+                                <LucideIcon name={isOpen ? "ChevronDown" : "ChevronRight"} size={18} className="text-slate-500" />
+                              </button>
+
+                              {isOpen && (
+                                <div className="px-4 pb-4">
+                                  <div className="flex items-center justify-end gap-2 mb-3">
+                                    <button
+                                      onClick={() => restoreCategory(cat.id)}
+                                      className="px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-black border border-emerald-500/20"
+                                    >
+                                      Restore category
+                                    </button>
+                                    <button
+                                      onClick={() => openConfirm({
+                                        title: `Permanently delete "${cat.name}"?`,
+                                        description: `This removes it from interface AND scrubs its task history from analytics across all days.`,
+                                        dangerText: "Delete permanently",
+                                        onConfirm: async () => permanentlyDeleteCategory(cat.id)
+                                      })}
+                                      className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs font-black border border-red-500/20"
+                                    >
+                                      Delete permanently
+                                    </button>
+                                  </div>
+
+                                  {catTasks.length > 0 && (
+                                    <div className="space-y-2">
+                                      <div className="text-[10px] font-bold uppercase text-slate-600 mb-1">Archived tasks inside</div>
+                                      {catTasks.map(t => (
+                                        <div key={t.id} className="flex items-center justify-between bg-black/40 border border-white/5 rounded-xl px-3 py-2">
+                                          <div className="min-w-0">
+                                            <div className="text-xs text-slate-300 truncate">{t.name}</div>
+                                            <div className="text-[10px] text-slate-600 kbd">{taskKey(t)}</div>
+                                          </div>
+                                          <button
+                                            onClick={() => restoreTaskByKey(taskKey(t))}
+                                            className="px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-[11px] font-black border border-emerald-500/20"
+                                          >
+                                            Restore
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+                </div>
+
+              ) : view === 'tracker' ? (
+                // =====================
+                // TRACKER
+                // =====================
+                <div className="p-6">
+                  <div className="bg-[#15191e] rounded-2xl border border-white/5 overflow-hidden flex shadow-2xl">
+                    <div className="w-64 flex-shrink-0 bg-[#0d0f12] border-r border-white/5 z-20">
+                      <div className="h-14 flex items-center px-4 border-b border-white/5 text-[10px] uppercase text-slate-500 font-bold justify-between">
+                        <span>Objective Map</span>
+                        <span className="text-[10px] text-slate-700">{showArchivedTracker ? 'ALL' : 'ACTIVE'}</span>
+                      </div>
+
+                      {categories.map(cat => {
+                        const isCatArchived = cat.endDay !== undefined;
+                        const catBlock = trackerTasksByCat[cat.id] || { active: [], archived: [] };
+                        const isOpen = trackerCatOpen[cat.id] !== false;
+                        const tasksToShow = showArchivedTracker
+                          ? [...catBlock.active, ...catBlock.archived]
+                          : catBlock.active;
+
+                        if (!showArchivedTracker && isCatArchived && catBlock.active.length === 0) {
+                          return null;
+                        }
+
+                        return (
+                          <React.Fragment key={cat.id}>
+                            <button
+                              onClick={() => setTrackerCatOpen(p => ({ ...p, [cat.id]: !isOpen }))}
+                              className="w-full h-10 flex items-center px-4 bg-white/5 border-b border-white/5 text-xs font-black justify-between hover:bg-white/10 transition-colors"
+                              style={{ color: cat.color }}
+                              title="Collapse/Expand"
+                            >
+                              <span className="truncate">{cat.name}{isCatArchived ? ' (ARCH)' : ''}</span>
+                              <LucideIcon name={isOpen ? "ChevronDown" : "ChevronRight"} size={16} className="text-slate-500" />
+                            </button>
+
+                            {isOpen && tasksToShow.map(task => (
+                              <div
+                                key={task.id}
+                                className={`h-14 flex items-center px-6 border-b border-white/5 text-xs font-medium overflow-hidden text-ellipsis whitespace-nowrap ${task.endDay !== undefined ? 'text-slate-600' : 'text-slate-400'}`}
+                                title={task.name}
+                              >
+                                {task.name}
+                              </div>
+                            ))}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+
+                    <div
+  ref={scrollContainerRef}
+  className="flex-grow overflow-x-auto custom-scrollbar scroll-smooth"
+>
+                      <div style={{ width: `${visibleDayIndices.length * 56}px` }}>
+                        <div className="h-14 flex bg-[#0d0f12] border-b border-white/5">
+                          {visibleDayIndices.map(i => (
+                            <div
+                              key={i}
+                              onClick={() => setSelectedDay(i)}
+                              className={`w-14 border-r border-white/5 flex flex-col items-center justify-center cursor-pointer transition-colors ${i === activeDayIdx ? 'bg-emerald-500/20 shadow-[inset_0_0_10px_rgba(16,185,129,0.1)]' : 'hover:bg-white/5'}`}
+                            >
+                              <span className={`text-[10px] font-mono ${i === activeDayIdx ? 'text-emerald-400 font-black' : 'text-slate-600'}`}>
+                                {getDayDetails(i).dateStr}
+                              </span>
+                              <div className="flex gap-0.5 mt-1">
+                                {notes[i] && <div className="w-1 h-1 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.6)]" />}
+                                {healthLogs[i]?.in ? <div className="w-1 h-1 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]" /> : null}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {categories.map(cat => {
+                          const isCatArchived = cat.endDay !== undefined;
+                          const catBlock = trackerTasksByCat[cat.id] || { active: [], archived: [] };
+                          const isOpen = trackerCatOpen[cat.id] !== false;
+                          const tasksToShow = showArchivedTracker
+                            ? [...catBlock.active, ...catBlock.archived]
+                            : catBlock.active;
+
+                          if (!showArchivedTracker && isCatArchived && catBlock.active.length === 0) return null;
+
+                          return (
+                            <React.Fragment key={cat.id}>
+                              <div className="h-10 flex bg-white/5 border-b border-white/5">
+                                {visibleDayIndices.map(i => (
+  <div key={i} className="w-14 border-r border-white/5" />
+))}
+
+                              </div>
+
+                              {isOpen && tasksToShow.map(task => (
+                                <div key={task.id} className="h-14 flex border-b border-white/5">
+                                  {visibleDayIndices.map(i => {
+  const { start, effectiveEnd } = getTaskWindow(task);
+
+  if (i < start) {
+    return (
+      <div
+        key={i}
+        className="w-14 border-r border-white/5 bg-[#000000] opacity-50"
+      />
+    );
+  }
+
+                                    const afterEnd = i > effectiveEnd;
+                                    const isFuture = i > activeDayIdx;
+
+                                    const key = taskKey(task);
+                                    const isDone = logs[key]?.[i] === 1;
+                                    const isToday = i === activeDayIdx;
+
+                                    const canClick = !isFuture && !afterEnd;
+
+                                    return (
+                                      <div
+                                        key={i}
+                                        onClick={() => canClick && toggleHabit(task, i)}
+                                        className={`w-14 border-r border-white/5 flex items-center justify-center
+                                          ${canClick ? 'cursor-pointer hover:bg-white/[0.02]' : 'opacity-30 pointer-events-none'}
+                                          ${isToday ? 'bg-emerald-500/[0.03]' : ''}
+                                        `}
+                                        title={afterEnd ? 'Archived window' : ''}
+                                      >
+                                        {isDone && <div className="w-8 h-8 rounded-xl shadow-lg" style={{ backgroundColor: cat.color }} />}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              ) : (
+                // =====================
+                // INSIGHTS
+                // =====================
+                <div className="p-8 max-w-6xl mx-auto space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
+                    <div className="bg-[#15191e] p-6 rounded-3xl border border-white/5 shadow-xl">
+                      <div className="text-4xl font-black text-white">{stats.overallProgress}%</div>
+                      <div className="text-xs text-slate-500 font-bold uppercase mt-2">Overall Progress</div>
+                    </div>
+                    <div className="bg-[#15191e] p-6 rounded-3xl border border-white/5 shadow-xl">
+                      <div className="text-4xl font-black text-white">{stats.bestStreak}</div>
+                      <div className="text-xs text-slate-500 font-bold uppercase mt-2">Best Streak</div>
+                    </div>
+
+                    <div className="bg-[#15191e] p-6 rounded-3xl border border-white/5 shadow-xl relative overflow-hidden">
+                      <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-red-500/20 blur-2xl"></div>
+                      <div className="absolute -bottom-10 -left-10 w-28 h-28 rounded-full bg-orange-500/20 blur-2xl"></div>
+
+                      <div className="flex items-center justify-between">
+                        <div className="text-4xl font-black text-white">{stats.resilience}%</div>
+                        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-red-500 to-orange-400 shadow-lg flex items-center justify-center">
+                          <LucideIcon name="Flame" size={18} className="text-white" />
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-slate-500 font-bold uppercase mt-2">Resilience</div>
+                      <div className="text-[10px] text-slate-600 mt-1">Lifetime comeback avg</div>
+                    </div>
+
+                    <div className="bg-[#15191e] p-6 rounded-3xl border border-white/5 shadow-xl">
+                      {/* ✅ UPDATE 1: show last entered weight from stats.healthChartData */}
+                      <div className="text-4xl font-black text-white">
+                        {(stats.healthChartData[stats.healthChartData.length - 1]?.weight || 72)}
+                        <span className="text-sm font-normal text-slate-600">kg</span>
+                      </div>
+                      <div className="text-xs text-slate-500 font-bold uppercase mt-2">Current Weight</div>
+                    </div>
+
+                    {/* ✅ UPDATE 8: BMI card */}
+                    <div className="bg-[#15191e] p-6 rounded-3xl border border-white/5 shadow-xl relative overflow-hidden">
+                      <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-emerald-500/15 blur-2xl"></div>
+                      <div className="absolute -bottom-10 -left-10 w-28 h-28 rounded-full bg-red-500/10 blur-2xl"></div>
+
+                      <div className="flex items-center justify-between">
+                        <div className="text-4xl font-black text-white">{stats.bmi || 0}</div>
+                        <div className="w-10 h-10 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+                          <LucideIcon name="HeartPulse" size={18} className="text-emerald-300" />
+                        </div>
+                      </div>
+                      <div className="text-xs text-slate-500 font-bold uppercase mt-2">BMI</div>
+
+                      <div className="mt-3">
+                        <div className="h-2 rounded-full bg-gradient-to-r from-emerald-500 via-yellow-400 to-red-500 relative overflow-hidden">
+                          <div
+                            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-[0_0_18px_rgba(255,255,255,0.35)]"
+                            style={{ left: `calc(${clamp((stats.bmi / 35) * 100, 0, 100)}% - 6px)` }}
+                            title="BMI marker"
+                          ></div>
+                        </div>
+                        <div className="text-[10px] text-slate-600 mt-1">Normal: 18.5 – 24.9</div>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#15191e] p-6 rounded-3xl border border-white/5 shadow-xl">
+                      <div className="text-4xl font-black text-white">{activeDayIdx + 1}<span className="text-sm font-normal text-slate-600">/365</span></div>
+                      <div className="text-xs text-slate-500 font-bold uppercase mt-2">Year Day</div>
+                    </div>
+                  </div>
+
+                  {/* Health Engine Chart */}
+                  <div className="bg-[#15191e] p-8 rounded-3xl border border-white/5 shadow-xl h-96 relative">
+                    <h3 className="text-white font-bold flex items-center gap-2 mb-4">
+                      <LucideIcon name="Dna" className="text-emerald-500" /> Health Engine Alignment
+                    </h3>
+                    <div className="absolute top-8 right-8 flex gap-4 text-[10px] font-bold uppercase text-slate-500">
+                      <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Calorie Deficit</span>
+                      <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Weight</span>
+                    </div>
+
+                    {stats.healthChartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={stats.healthChartData}>
+                          <CartesianGrid stroke="#ffffff05" vertical={false} />
+                          <XAxis dataKey="date" hide />
+                          <YAxis yAxisId="left" hide domain={[-1000, 1000]} />
+                          {/* ✅ UPDATE 2: weight axis supports 40kg */}
+                          <YAxis yAxisId="right" hide domain={[40, 90]} orientation="right" />
+                          {/* ⭐ Goal Weight Reference */}
+                          {profile.goalWeight && stats.healthChartData.length > 0 && (() => {
+                            const lastWeight =
+                              stats.healthChartData[stats.healthChartData.length - 1]?.weight;
+
+                            const goal = Number(profile.goalWeight);
+                            const nearGoal = Math.abs(lastWeight - goal) <= 0.5;
+
+                            return (
+                              <ReferenceLine
+                                yAxisId="right"
+                                y={goal}
+                                stroke="#facc15"
+                                strokeDasharray="4 4"
+                                strokeOpacity={0.6}
+                                label={<GoalWeightStar payload={{ nearGoal }} />}
+                              />
+                            );
+                          })()}
+                          <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} itemStyle={{ color: 'white' }} />
+                          <ReferenceLine yAxisId="left" y={0} stroke="#ffffff20" />
+                          <Bar yAxisId="left" dataKey="netKcal" radius={[4, 4, 0, 0]}>
+                            {stats.healthChartData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.netKcal < 0 ? '#10b981' : '#ef4444'} fillOpacity={0.6} />
+                            ))}
+                          </Bar>
+                          <Line yAxisId="right" type="monotone" dataKey="weight" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-slate-500 text-sm">No Health Data Yet</div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-8">
+                    <div className="bg-[#15191e] p-8 rounded-3xl border border-white/5 shadow-xl h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RadarChart cx="50%" cy="50%" outerRadius="80%" data={stats.categoryStats}>
+                          <PolarGrid stroke="#ffffff10" />
+                          <PolarAngleAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} />
+                          <Radar dataKey="value" stroke="#10b981" fill="#10b981" fillOpacity={0.2} />
+                          {/* ✅ UPDATE 6: custom tooltip with done/possible */}
+                          <Tooltip content={<RadarTooltip />} />
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* =====================
+                DAY SIDEBAR
+            ====================== */}
+            <aside className={`fixed right-0 top-0 h-full w-80 bg-[#15191e] border-l border-white/10 z-[60] shadow-2xl transition-transform duration-300 ${selectedDay === null ? 'translate-x-full' : 'translate-x-0'}`}>
+              {selectedDay !== null && (
+                <div className="h-full flex flex-col p-6">
+                  <div className="flex justify-between items-center mb-6">
+                    <div>
+                      <h4 className="font-bold">{getDayDetails(selectedDay).dateStr}</h4>
+                      <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Health & Journal</span>
+                    </div>
+                    <button onClick={() => setSelectedDay(null)} className="text-slate-500">
+                      <LucideIcon name="X" size={20} />
+                    </button>
+                  </div>
+
+                  <div className="bg-white/5 p-4 rounded-xl mb-6 space-y-4">
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        <span>In</span>
+                        <span className="text-emerald-400">{healthLogs[selectedDay]?.in || 0} / 1600</span>
+                      </div>
+                      <input
+                        type="number"
+                        className="h-input"
+                        value={healthLogs[selectedDay]?.in === 0 ? '' : (healthLogs[selectedDay]?.in || '')}
+                        onChange={(e) => updateHealth(selectedDay, 'in', e.target.value)}
+                        placeholder="0"
+                      />
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        <button onClick={() => addToHealth(selectedDay, 'in', 300)} className="h-btn">+300 P+C</button>
+                        <button onClick={() => addToHealth(selectedDay, 'in', 280)} className="h-btn">+280 Paneer</button>
+                        <button onClick={() => addToHealth(selectedDay, 'in', 120)} className="h-btn">+120 Fruit</button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        <span>Out</span>
+                        <span className="text-blue-400">{healthLogs[selectedDay]?.out || 0} / 500</span>
+                      </div>
+                      <input
+                        type="number"
+                        className="h-input"
+                        value={healthLogs[selectedDay]?.out === 0 ? '' : (healthLogs[selectedDay]?.out || '')}
+                        onChange={(e) => updateHealth(selectedDay, 'out', e.target.value)}
+                        placeholder="0"
+                      />
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        <button onClick={() => addToHealth(selectedDay, 'out', 375)} className="h-btn">+375 Run (5km)</button>
+                        <button onClick={() => addToHealth(selectedDay, 'out', 100)} className="h-btn">+100 Str</button>
+                        <button onClick={() => addToHealth(selectedDay, 'out', 100)} className="h-btn">+100 Flex</button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-slate-400 mb-1 block">Weight (kg)</label>
+                      <input
+                        type="number"
+                        className="h-input"
+                        value={healthLogs[selectedDay]?.weight === 0 ? '' : (healthLogs[selectedDay]?.weight || '')}
+                        // ✅ UPDATE 4A: Prevent editing future-day weight
+                        onChange={(e) => {
+                          if (selectedDay > activeDayIdx) return;
+                          updateHealth(selectedDay, 'weight', e.target.value);
+                        }}
+                        placeholder="72.0"
+                      />
+                      {selectedDay > activeDayIdx && (
+                        <div className="text-[10px] text-slate-600 mt-1">Future days are locked.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <textarea
+                    value={notes[selectedDay] || ''}
+                    onChange={(e) => updateNote(selectedDay, e.target.value)}
+                    placeholder="Journal entry..."
+                    className="flex-grow bg-[#0d0f12] border border-white/10 rounded-2xl p-4 text-sm focus:outline-none transition-colors resize-none"
+                  />
+                </div>
+              )}
+            </aside>
+
+          </div>
+
+          <style dangerouslySetInnerHTML={{
+            __html: `
+              .custom-scrollbar::-webkit-scrollbar { height: 6px; }
+              .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+              .custom-scrollbar::-webkit-scrollbar-thumb { background: #30363d; border-radius: 10px; }
+              .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #484f58; }
+            `
+          }} />
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
