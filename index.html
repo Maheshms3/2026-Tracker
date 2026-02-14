@@ -1033,16 +1033,28 @@ const visibleDayIndices = useMemo(() => {
         if (curW === null) curW = 72;
 
         const healthChartData = [];
-        const sIdx = Math.max(0, activeDayIdx - 30);
-        for (let i = sIdx; i <= activeDayIdx; i++) {
-          const h = healthLogs[i] || {};
-          const intake = Number(h.in || 0);
-          const burn = Number(h.out || 0);
-          const netKcal = intake > 0 ? (intake - (1800 + burn)) : 0;
-          if (h.weight) curW = Number(h.weight);
-          healthChartData.push({ name: i, date: getDayDetails(i).dateStr, netKcal, weight: curW });
-        }
-        if (!healthChartData.length) healthChartData.push({ name: 0, date: '', netKcal: 0, weight: curW });
+const sIdx = 0;  // ✅ from first day (Jan 1)
+
+for (let i = sIdx; i <= activeDayIdx; i++) {
+  const h = healthLogs[i] || {};
+  const intake = Number(h.in || 0);
+  const burn = Number(h.out || 0);
+
+  const netKcal = intake > 0 ? (intake - (1800 + burn)) : 0;
+
+  if (h.weight) curW = Number(h.weight);
+
+  healthChartData.push({
+    name: i,
+    date: getDayDetails(i).dateStr,
+    netKcal,
+    weight: curW
+  });
+}
+
+if (!healthChartData.length) {
+  healthChartData.push({ name: 0, date: '', netKcal: 0, weight: curW });
+}
 
         // Streak analytics (dedupe by behaviorKey)
         const taskAnalytic = [];
@@ -2026,4 +2038,5 @@ const visibleDayIndices = useMemo(() => {
   </script>
 </body>
 </html>
+
 
